@@ -24,6 +24,26 @@ class Database:
         self.fallback_dir = "data"
         os.makedirs(self.fallback_dir, exist_ok=True)
         
+        # Caching for faster operations
+        self._cache = {
+            "user_config": {},  # user_id -> config
+            "chat_config": {},  # chat_id -> config 
+            "user_favorites": {},  # user_id -> favorites
+            "top_tracks": {},  # chat_id -> top tracks
+        }
+        self._cache_ttl = {
+            "user_config": 300,  # 5 minutes
+            "chat_config": 300,  # 5 minutes
+            "user_favorites": 120,  # 2 minutes
+            "top_tracks": 180,  # 3 minutes
+        }
+        self._cache_timestamps = {
+            "user_config": {},
+            "chat_config": {},
+            "user_favorites": {},
+            "top_tracks": {},
+        }
+        
         # Initialize connection
         asyncio.create_task(self.init_connection())
     
@@ -45,28 +65,74 @@ class Database:
             logger.error(f"Failed to connect to MongoDB: {e}", exc_info=True)
             self.connected = False
     
+    def _is_cache_valid(self, cache_type, key):
+        """Check if a cache entry is valid (not expired)."""
+        if key not in self._cache_timestamps.get(cache_type, {}):
+            return False
+        
+        timestamp = self._cache_timestamps[cache_type][key]
+        ttl = self._cache_ttl[cache_type]
+        
+        return (time.time() - timestamp) < ttl
+    
+    def _get_cache(self, cache_type, key):
+        """Get a value from cache if it exists and is valid."""
+        if self._is_cache_valid(cache_type, key):
+            return self._cache[cache_type].get(key)
+        return None
+    
+    def _set_cache(self, cache_type, key, value):
+        """Set a value in the cache."""
+        self._cache[cache_type][key] = value
+        self._cache_timestamps[cache_type][key] = time.time()
+        return value
+    
+    def _invalidate_cache(self, cache_type, key=None):
+        """Invalidate a cache entry or an entire cache type."""
+        if key is None:
+            # Invalidate all entries of this type
+            self._cache[cache_type] = {}
+            self._cache_timestamps[cache_type] = {}
+        else:
+            # Invalidate just one key
+            if key in self._cache[cache_type]:
+                del self._cache[cache_type][key]
+            if key in self._cache_timestamps[cache_type]:
+                del self._cache_timestamps[cache_type][key]
+    
     async def get_user_config(self, user_id: int) -> Dict[str, Any]:
         """Get user configuration from the database."""
+        # Try cache first for fast response
+        cached = self._get_cache("user_config", user_id)
+        if cached:
+            return cached
+        
+        # If not in cache, proceed with normal lookup
         if self.config:
             # Use the in-memory config if available
             user_config = self.config.get_user_config(user_id)
-            return user_config.to_dict()
+            result = user_config.to_dict()
+            return self._set_cache("user_config", user_id, result)
         
         if self.connected:
             result = await self.db.user_configs.find_one({"user_id": user_id})
             if result:
-                return result
+                return self._set_cache("user_config", user_id, result)
         
         # Fallback to file-based storage
         file_data = await self._get_from_file(f"user_{user_id}", None)
         if file_data:
-            return file_data
+            return self._set_cache("user_config", user_id, file_data)
         
         # Return default user config
-        return UserConfig(user_id=user_id).to_dict()
+        default_config = UserConfig(user_id=user_id).to_dict()
+        return self._set_cache("user_config", user_id, default_config)
     
     async def update_user_config(self, user_id: int, config_data: Dict[str, Any]) -> None:
         """Update user configuration in the database."""
+        # Invalidate cache for this user_id
+        self._invalidate_cache("user_config", user_id)
+        
         if self.config:
             # Update the in-memory config
             self.config.update_user_config(user_id, **config_data)
@@ -86,26 +152,37 @@ class Database:
     
     async def get_chat_config(self, chat_id: int) -> Dict[str, Any]:
         """Get chat configuration from the database."""
+        # Try cache first for fast response
+        cached = self._get_cache("chat_config", chat_id)
+        if cached:
+            return cached
+        
+        # If not in cache, proceed with normal lookup
         if self.config:
             # Use the in-memory config if available
             chat_config = self.config.get_chat_config(chat_id)
-            return chat_config.to_dict()
+            result = chat_config.to_dict()
+            return self._set_cache("chat_config", chat_id, result)
         
         if self.connected:
             result = await self.db.chat_configs.find_one({"chat_id": chat_id})
             if result:
-                return result
+                return self._set_cache("chat_config", chat_id, result)
         
         # Fallback to file-based storage
         file_data = await self._get_from_file(f"chat_{chat_id}", None)
         if file_data:
-            return file_data
+            return self._set_cache("chat_config", chat_id, file_data)
         
         # Return default chat config
-        return ChatConfig(chat_id=chat_id).to_dict()
+        default_config = ChatConfig(chat_id=chat_id).to_dict()
+        return self._set_cache("chat_config", chat_id, default_config)
     
     async def update_chat_config(self, chat_id: int, config_data: Dict[str, Any]) -> None:
         """Update chat configuration in the database."""
+        # Invalidate cache for this chat_id
+        self._invalidate_cache("chat_config", chat_id)
+        
         if self.config:
             # Update the in-memory config
             self.config.update_chat_config(chat_id, **config_data)
@@ -125,6 +202,9 @@ class Database:
     
     async def add_user_favorite(self, user_id: int, track_id: str, track_info: Dict[str, Any]) -> None:
         """Add a track to user's favorites."""
+        # Invalidate cache
+        self._invalidate_cache("user_favorites", user_id)
+        
         favorite_data = {
             "track_id": track_id,
             "name": track_info.get("name", "Unknown"),
@@ -165,6 +245,9 @@ class Database:
     
     async def remove_user_favorite(self, user_id: int, track_id: str) -> bool:
         """Remove a track from user's favorites. Returns True if successful."""
+        # Invalidate cache
+        self._invalidate_cache("user_favorites", user_id)
+        
         if self.config:
             # Update in-memory config
             user_config = self.config.get_user_config(user_id)
@@ -194,22 +277,36 @@ class Database:
     
     async def get_user_favorites(self, user_id: int, limit: int = 20) -> List[Dict[str, Any]]:
         """Get user's favorite tracks."""
+        # Try cache first for fast response
+        cache_key = f"{user_id}_{limit}"
+        cached = self._get_cache("user_favorites", cache_key)
+        if cached:
+            return cached
+            
+        # If not in cache, proceed with normal lookup
+        result = None
+        
         if self.config:
             # Get from in-memory config
             user_config = self.config.get_user_config(user_id)
             # Note: This only returns IDs, not full track info
-            return [{"track_id": track_id} for track_id in user_config.favorite_tracks[:limit]]
-        
-        if self.connected:
+            result = [{"track_id": track_id} for track_id in user_config.favorite_tracks[:limit]]
+        elif self.connected:
             cursor = self.db.user_favorites.find({"user_id": user_id}).sort("added_at", -1).limit(limit)
-            return await cursor.to_list(length=limit)
+            result = await cursor.to_list(length=limit)
         else:
             # Fallback to file storage
             favorites = await self._get_from_file(f"favorites_{user_id}", {"user_id": user_id, "tracks": []})
-            return sorted(favorites["tracks"], key=lambda x: x.get("added_at", 0), reverse=True)[:limit]
+            result = sorted(favorites["tracks"], key=lambda x: x.get("added_at", 0), reverse=True)[:limit]
+            
+        # Cache the result
+        return self._set_cache("user_favorites", cache_key, result)
     
     async def add_played_track(self, chat_id: int, track_info: Dict[str, Any], user_id: Optional[int] = None) -> None:
         """Add a track to the played tracks history."""
+        # Invalidate any cached top tracks for this chat since we're adding a new play
+        self._invalidate_cache("top_tracks", None)  # Clear all top_tracks cache entries
+        
         track_data = {
             "chat_id": chat_id,
             "track_id": track_info.get("id", "unknown"),
@@ -237,6 +334,15 @@ class Database:
     
     async def get_top_tracks(self, chat_id: int, limit: int = 10) -> List[Dict[str, Any]]:
         """Get the top played tracks for a chat."""
+        # Try cache first for fast response
+        cache_key = f"{chat_id}_{limit}"
+        cached = self._get_cache("top_tracks", cache_key)
+        if cached:
+            return cached
+        
+        # If not in cache, proceed with normal lookup
+        result = None
+        
         if self.connected:
             pipeline = [
                 {"$match": {"chat_id": chat_id}},
@@ -252,7 +358,6 @@ class Database:
             ]
             
             result = await self.db.played_tracks.aggregate(pipeline).to_list(length=limit)
-            return result
         else:
             history = await self._get_from_file(f"history_{chat_id}", {"chat_id": chat_id, "tracks": []})
             
@@ -276,13 +381,14 @@ class Database:
                 )
             
             # Sort and limit
-            top_tracks = sorted(
+            result = sorted(
                 track_counts.values(),
                 key=lambda x: (x["count"], x["last_played"]),
                 reverse=True
             )[:limit]
-            
-            return top_tracks
+        
+        # Cache the result before returning
+        return self._set_cache("top_tracks", cache_key, result)
     
     async def record_user_activity(self, user_id: int, action: str, chat_id: Optional[int] = None) -> None:
         """Record user activity for analytics."""

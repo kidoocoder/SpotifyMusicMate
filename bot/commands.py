@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import time
+import re
 from pyrogram import filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -13,6 +14,7 @@ from .helpers import (
     format_time
 )
 from .ui import send_now_playing, send_search_results
+from .start import handle_start_command, handle_owner_command
 
 logger = logging.getLogger(__name__)
 
@@ -24,21 +26,40 @@ def register_commands(bot, voice_chat, queue_manager, spotify, database, lyrics_
     bot.spotify = spotify
     bot.database = database
     bot.lyrics_client = lyrics_client
+    bot.config = config
     
-    @bot.on_message(filters.command(["start", "help"]))
+    @bot.on_message(filters.command(["start"]))
     async def cmd_start(client, message: Message):
-        """Handler for /start and /help commands."""
+        """Enhanced handler for /start command showing user profile picture."""
+        # Send immediate typing action for better user experience
+        await client.send_chat_action(message.chat.id, "typing")
+        
         user_id = message.from_user.id if message.from_user else None
         
-        # Record user activity
+        # Record user activity in background
         if user_id:
-            await database.record_user_activity(user_id, "help")
+            asyncio.create_task(database.record_user_activity(user_id, "start"))
+        
+        # Use the enhanced start command handler
+        await handle_start_command(client, message, config)
+    
+    @bot.on_message(filters.command(["help"]))
+    async def cmd_help(client, message: Message):
+        """Handler for /help command."""
+        # Send immediate typing action for better user experience
+        await client.send_chat_action(message.chat.id, "typing")
+        
+        user_id = message.from_user.id if message.from_user else None
+        
+        # Record user activity in background to avoid delay
+        if user_id:
+            asyncio.create_task(database.record_user_activity(user_id, "help"))
         
         help_text = """
 🎵 **Music Bot Help** 🎵
 
 **Basic Commands:**
-/play [song name or Spotify URL] - Play a song or add to queue
+/play [song name or Spotify URL] - Play a song in voice chat
 /pause - Pause the current song
 /resume - Resume the current song
 /skip - Skip to the next song
@@ -46,7 +67,7 @@ def register_commands(bot, voice_chat, queue_manager, spotify, database, lyrics_
 /queue - Show the current queue
 /current - Show the current song
 /search [query] - Search for a song
-/lyrics [optional: song name] - Get lyrics for current or specified song
+/lyrics [optional: song name] - Get lyrics for current song
 
 **User Commands:**
 /profile - View your user profile
@@ -66,11 +87,14 @@ Start by using /play command to play music in a voice chat!
     @bot.on_message(filters.command("play"))
     async def cmd_play(client, message: Message):
         """Handler for /play command."""
+        # Send immediate typing action for better user experience
+        await client.send_chat_action(message.chat.id, "typing")
+        
         chat_id = message.chat.id
         user_id = message.from_user.id
         
-        # Check for rate limiting
-        if not await rate_limiter(user_id, "play", limit=3, time_window=10):
+        # Check for rate limiting (more lenient for better user experience)
+        if not await rate_limiter(user_id, "play", limit=5, time_window=10):
             await message.reply("You're using this command too frequently! Please wait a bit.")
             return
         
@@ -82,22 +106,39 @@ Start by using /play command to play music in a voice chat!
         
         query = query[1].strip()
         
-        # Send a temporary message
+        # Send a temporary message immediately
         status_msg = await message.reply("🔍 Searching...")
         
-        # Check if it's a Spotify link
-        if "spotify.com/track/" in query:
+        # Optimize the search process
+        # Check if it's a Spotify link for faster processing
+        is_spotify_link = "spotify.com/track/" in query
+        
+        # Create task for searching
+        search_task = None
+        if is_spotify_link:
             track_id = query.split("spotify.com/track/")[1].split("?")[0]
-            track = await spotify.get_track(track_id)
-            if not track:
+            search_task = asyncio.create_task(spotify.get_track(track_id))
+        else:
+            search_task = asyncio.create_task(spotify.search(query))
+        
+        # Check if we're already in a voice chat while waiting for search results
+        voice_check_task = None
+        if chat_id not in voice_chat.active_calls:
+            # Prepare to join voice chat in parallel
+            voice_check_task = asyncio.create_task(voice_chat.join_voice_chat(chat_id, user_id))
+        
+        # Wait for search results
+        result = await search_task
+        
+        # Process search results
+        if is_spotify_link:
+            if not result:
                 await status_msg.edit_text("❌ Failed to get track information from Spotify.")
                 return
-            
-            tracks = [track]
+            tracks = [result]
         else:
-            # Search for tracks
-            tracks = await spotify.search(query)
-        
+            tracks = result
+            
         if not tracks:
             await status_msg.edit_text("❌ No tracks found matching your query.")
             return
@@ -105,27 +146,37 @@ Start by using /play command to play music in a voice chat!
         # Get the first track
         track = tracks[0]
         
-        # Check if we're in a voice chat
+        # Check voice chat status
         if chat_id not in voice_chat.active_calls:
-            # Join voice chat first
-            await status_msg.edit_text("🔄 Joining voice chat...")
-            success = await voice_chat.join_voice_chat(chat_id, user_id)
-            if not success:
-                await status_msg.edit_text("❌ Failed to join voice chat. Make sure I have the right permissions and there's an active voice chat.")
-                return
-        
-        # Check if something is already playing
+            # If we started joining earlier, wait for the result
+            if voice_check_task:
+                await status_msg.edit_text("🔄 Joining voice chat...")
+                success = await voice_check_task
+                if not success:
+                    await status_msg.edit_text("❌ Failed to join voice chat. Make sure I have the right permissions and there's an active voice chat.")
+                    return
+            else:
+                # Otherwise join now
+                await status_msg.edit_text("🔄 Joining voice chat...")
+                success = await voice_chat.join_voice_chat(chat_id, user_id)
+                if not success:
+                    await status_msg.edit_text("❌ Failed to join voice chat. Make sure I have the right permissions and there's an active voice chat.")
+                    return
+                
+        # Check if something is already playing and add to queue if needed
         if voice_chat.active_calls[chat_id].get("current_track"):
-            # Add to queue
             await status_msg.edit_text(f"🔄 Adding **{track['name']}** to the queue...")
             success, message_text = await queue_manager.add_to_queue(chat_id, track, user_id)
             await status_msg.edit_text(message_text)
+            
+            # Record activity in background
+            asyncio.create_task(database.record_user_activity(user_id, "play", chat_id))
             return
         
         # Otherwise, play the track
         await status_msg.edit_text(f"🔄 Downloading **{track['name']}**...")
         
-        # Download track
+        # Download track 
         downloaded_track = await spotify.download_track(track)
         if not downloaded_track:
             await status_msg.edit_text(f"❌ Failed to download **{track['name']}**. Spotify preview might not be available.")
@@ -135,11 +186,9 @@ Start by using /play command to play music in a voice chat!
         success, message_text = await voice_chat.play_track(chat_id, downloaded_track, user_id)
         
         if success:
-            # Add to database
-            await database.add_played_track(chat_id, downloaded_track, user_id)
-            
-            # Record user activity
-            await database.record_user_activity(user_id, "play", chat_id)
+            # Start database updates in background to speed up response
+            asyncio.create_task(database.add_played_track(chat_id, downloaded_track, user_id))
+            asyncio.create_task(database.record_user_activity(user_id, "play", chat_id))
             
             # Update UI
             await status_msg.delete()
@@ -184,15 +233,33 @@ Start by using /play command to play music in a voice chat!
     @bot.on_callback_query(filters=lambda query: query.data.startswith("play_"))
     async def callback_play_song(client, callback_query):
         """Handle callback for playing a song from search results."""
+        # Immediately acknowledge that we received the callback
+        await callback_query.answer("Processing your selection...")
+        
         track_id = callback_query.data.split("_")[1]
         chat_id = callback_query.message.chat.id
         user_id = callback_query.from_user.id
         message_id = callback_query.message.id
         
-        # Get track information
-        track = await spotify.get_track(track_id)
+        # Edit the message immediately to show we're processing
+        await client.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text="🔄 Processing your selection..."
+        )
+        
+        # Start asynchronous tasks in parallel
+        # 1. Get track information
+        track_task = asyncio.create_task(spotify.get_track(track_id))
+        
+        # 2. Check if we need to join voice chat and start that process
+        voice_check_task = None
+        if chat_id not in voice_chat.active_calls:
+            voice_check_task = asyncio.create_task(voice_chat.join_voice_chat(chat_id, user_id))
+        
+        # Wait for track info first
+        track = await track_task
         if not track:
-            await callback_query.answer("❌ Failed to get track information.")
             await client.edit_message_text(
                 chat_id=chat_id,
                 message_id=message_id,
@@ -200,31 +267,47 @@ Start by using /play command to play music in a voice chat!
             )
             return
         
-        # Edit the message
+        # Edit the message with track details
         await client.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
             text=f"🔄 Selected: **{track['name']}** by {track['artists']}"
         )
         
-        # Check if we're in a voice chat
+        # Check voice chat status
         if chat_id not in voice_chat.active_calls:
-            # Join voice chat first
-            await client.edit_message_text(
-                chat_id=chat_id,
-                message_id=message_id,
-                text=f"🔄 Joining voice chat..."
-            )
-            success = await voice_chat.join_voice_chat(chat_id, user_id)
-            if not success:
+            # If we started joining earlier, wait for result
+            if voice_check_task:
                 await client.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
-                    text="❌ Failed to join voice chat. Make sure I have the right permissions and there's an active voice chat."
+                    text=f"🔄 Joining voice chat..."
                 )
-                return
+                success = await voice_check_task
+                if not success:
+                    await client.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text="❌ Failed to join voice chat. Make sure I have the right permissions and there's an active voice chat."
+                    )
+                    return
+            else:
+                # Otherwise join now
+                await client.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=f"🔄 Joining voice chat..."
+                )
+                success = await voice_chat.join_voice_chat(chat_id, user_id)
+                if not success:
+                    await client.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        text="❌ Failed to join voice chat. Make sure I have the right permissions and there's an active voice chat."
+                    )
+                    return
         
-        # Check if something is already playing
+        # Check if something is already playing and add to queue if needed
         if voice_chat.active_calls[chat_id].get("current_track"):
             # Add to queue
             success, message_text = await queue_manager.add_to_queue(chat_id, track, user_id)
@@ -233,6 +316,9 @@ Start by using /play command to play music in a voice chat!
                 message_id=message_id,
                 text=message_text
             )
+            
+            # Record activity in background
+            asyncio.create_task(database.record_user_activity(user_id, "play", chat_id))
             await callback_query.answer("Added to queue!")
             return
         
@@ -257,11 +343,9 @@ Start by using /play command to play music in a voice chat!
         success, message_text = await voice_chat.play_track(chat_id, downloaded_track, user_id)
         
         if success:
-            # Add to database
-            await database.add_played_track(chat_id, downloaded_track, user_id)
-            
-            # Record user activity
-            await database.record_user_activity(user_id, "play", chat_id)
+            # Start database updates in background
+            asyncio.create_task(database.add_played_track(chat_id, downloaded_track, user_id))
+            asyncio.create_task(database.record_user_activity(user_id, "play", chat_id))
             
             # Delete the message or update to now playing
             await client.delete_messages(chat_id, message_id)
@@ -286,34 +370,63 @@ Start by using /play command to play music in a voice chat!
     @bot.on_message(filters.command("pause"))
     async def cmd_pause(client, message: Message):
         """Handler for /pause command."""
+        # Send immediate feedback
+        await client.send_chat_action(message.chat.id, "typing")
+        
         chat_id = message.chat.id
+        user_id = message.from_user.id if message.from_user else None
         
         # Check if we're in a voice chat
         if chat_id not in voice_chat.active_calls:
             await message.reply("❌ I'm not in a voice chat.")
             return
         
+        # Send the initial acknowledgment immediately
+        reply_msg = await message.reply("⏸️ Pausing...")
+        
         # Pause the track
         success, message_text = await voice_chat.pause(chat_id)
-        await message.reply(message_text)
+        
+        # Update reply message with result
+        await reply_msg.edit_text(message_text)
+        
+        # Record activity in background
+        if user_id:
+            asyncio.create_task(database.record_user_activity(user_id, "pause", chat_id))
     
     @bot.on_message(filters.command("resume"))
     async def cmd_resume(client, message: Message):
         """Handler for /resume command."""
+        # Send immediate feedback
+        await client.send_chat_action(message.chat.id, "typing")
+        
         chat_id = message.chat.id
+        user_id = message.from_user.id if message.from_user else None
         
         # Check if we're in a voice chat
         if chat_id not in voice_chat.active_calls:
             await message.reply("❌ I'm not in a voice chat.")
             return
         
+        # Send the initial acknowledgment immediately
+        reply_msg = await message.reply("▶️ Resuming...")
+        
         # Resume the track
         success, message_text = await voice_chat.resume(chat_id)
-        await message.reply(message_text)
+        
+        # Update reply message with result
+        await reply_msg.edit_text(message_text)
+        
+        # Record activity in background
+        if user_id:
+            asyncio.create_task(database.record_user_activity(user_id, "resume", chat_id))
     
     @bot.on_message(filters.command("skip"))
     async def cmd_skip(client, message: Message):
         """Handler for /skip command."""
+        # Send immediate feedback
+        await client.send_chat_action(message.chat.id, "typing")
+        
         chat_id = message.chat.id
         user_id = message.from_user.id
         
@@ -322,27 +435,48 @@ Start by using /play command to play music in a voice chat!
             await message.reply("❌ I'm not in a voice chat.")
             return
         
+        # Send the initial acknowledgment immediately
+        reply_msg = await message.reply("⏭️ Skipping the current track...")
+        
         # Skip the track
         success, message_text = await voice_chat.skip(chat_id)
+        
         if success:
             current_track = voice_chat.active_calls[chat_id]["current_track"]
-            await message.reply(f"⏭️ Skipped to: **{current_track['name']}** by {current_track['artists']}")
+            await reply_msg.edit_text(f"⏭️ Skipped to: **{current_track['name']}** by {current_track['artists']}")
         else:
-            await message.reply(message_text)
+            await reply_msg.edit_text(message_text)
+        
+        # Record activity in background
+        if user_id:
+            asyncio.create_task(database.record_user_activity(user_id, "skip", chat_id))
     
     @bot.on_message(filters.command("stop"))
     async def cmd_stop(client, message: Message):
         """Handler for /stop command."""
+        # Send immediate feedback
+        await client.send_chat_action(message.chat.id, "typing")
+        
         chat_id = message.chat.id
+        user_id = message.from_user.id if message.from_user else None
         
         # Check if we're in a voice chat
         if chat_id not in voice_chat.active_calls:
             await message.reply("❌ I'm not in a voice chat.")
             return
         
+        # Send the initial acknowledgment immediately
+        reply_msg = await message.reply("🛑 Stopping playback and leaving voice chat...")
+        
         # Leave the voice chat
         success, message_text = await voice_chat.leave_voice_chat(chat_id)
-        await message.reply(message_text)
+        
+        # Update reply message with result
+        await reply_msg.edit_text(message_text)
+        
+        # Record activity in background
+        if user_id:
+            asyncio.create_task(database.record_user_activity(user_id, "stop", chat_id))
     
     @bot.on_message(filters.command("volume"))
     async def cmd_volume(client, message: Message):
@@ -966,3 +1100,15 @@ Start by using /play command to play music in a voice chat!
         await database.record_user_activity(user_id, "settings")
         
         await message.reply(text, reply_markup=keyboard)
+    
+    # Owner commands
+    @bot.on_message(filters.command(["broadcast", "stats", "reload", "clearqueue"], prefixes=config.COMMAND_PREFIX if config else "/"))
+    async def cmd_owner(client, message: Message):
+        """Handler for owner commands like broadcast, stats, reload, etc."""
+        # Extract command and arguments
+        full_command = message.text.split(" ", 1)
+        command = full_command[0][1:]  # Remove prefix
+        args = full_command[1] if len(full_command) > 1 else ""
+        
+        # Pass to handler for owner commands
+        await handle_owner_command(client, message, command, args, config, database)
