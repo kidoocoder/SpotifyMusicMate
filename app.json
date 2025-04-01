@@ -1,0 +1,72 @@
+{
+  "name": "Telegram Music Bot",
+  "description": "A sophisticated Telegram bot for playing Spotify songs in group/channel voice chats with an interactive UI.",
+  "repository": "https://github.com/yourusername/telegram-music-bot",
+  "logo": "https://raw.githubusercontent.com/yourusername/telegram-music-bot/main/assets/logo.png",
+  "keywords": ["python", "telegram", "bot", "music", "spotify", "voice-chat"],
+  "env": {
+    "API_ID": {
+      "description": "Your Telegram API ID from my.telegram.org/apps",
+      "required": true
+    },
+    "API_HASH": {
+      "description": "Your Telegram API Hash from my.telegram.org/apps",
+      "required": true
+    },
+    "BOT_TOKEN": {
+      "description": "Your bot token from @BotFather",
+      "required": true
+    },
+    "SESSION_STRING": {
+      "description": "A Pyrogram session string for assistant account",
+      "required": true
+    },
+    "SPOTIFY_CLIENT_ID": {
+      "description": "Your Spotify Client ID from developer.spotify.com/dashboard",
+      "required": true
+    },
+    "SPOTIFY_CLIENT_SECRET": {
+      "description": "Your Spotify Client Secret from developer.spotify.com/dashboard",
+      "required": true
+    },
+    "GENIUS_API_TOKEN": {
+      "description": "Your Genius API Token (optional but recommended for lyrics)",
+      "required": false
+    },
+    "MONGO_URI": {
+      "description": "MongoDB connection URI (optional)",
+      "required": false
+    },
+    "DURATION_LIMIT": {
+      "description": "Maximum duration in minutes for tracks (default: 180)",
+      "required": false,
+      "value": "180"
+    },
+    "DEFAULT_VOLUME": {
+      "description": "Default volume level (default: 100)",
+      "required": false,
+      "value": "100"
+    },
+    "ADMIN_IDS": {
+      "description": "Comma-separated list of admin user IDs",
+      "required": false
+    }
+  },
+  "scripts": {
+    "postdeploy": "cp requirements-external.txt requirements.txt"
+  },
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    },
+    {
+      "url": "https://github.com/jonathanong/heroku-buildpack-ffmpeg-latest.git"
+    }
+  ],
+  "formation": {
+    "worker": {
+      "quantity": 1,
+      "size": "eco"
+    }
+  }
+}

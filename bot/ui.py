@@ -133,6 +133,45 @@ def create_ui_components(bot):
                     reply_markup=get_main_keyboard()
                 )
                 await callback_query.answer("No active playback")
+                
+        elif data == "music_lyrics":
+            # Get lyrics for the current track
+            current_track = voice_chat.active_calls.get(chat_id, {}).get("current_track")
+            if not current_track:
+                await callback_query.answer("No track currently playing")
+                return
+            
+            # Get instances from bot
+            lyrics_client = getattr(client, "lyrics_client", None)
+            if not lyrics_client:
+                logger.error("Lyrics client not initialized")
+                await callback_query.answer("Lyrics functionality is not available")
+                return
+            
+            await callback_query.answer("Searching for lyrics...")
+            
+            # Get song name and artist
+            song_name = current_track["name"]
+            artist_name = current_track["artists"]
+            
+            # Get lyrics
+            lyrics_data = await lyrics_client.get_lyrics_by_search(song_name, artist_name)
+            
+            # Format lyrics
+            formatted_lyrics = lyrics_client.format_lyrics_for_telegram(lyrics_data)
+            
+            # Create back button
+            back_button = InlineKeyboardMarkup([
+                [InlineKeyboardButton(BACK_BUTTON, callback_data="music_back_to_player")]
+            ])
+            
+            # Send lyrics as a new message to avoid character limits
+            await client.send_message(
+                chat_id=chat_id,
+                text=formatted_lyrics,
+                reply_markup=back_button,
+                disable_web_page_preview=False
+            )
         
         else:
             await callback_query.answer("Unknown action")
@@ -208,7 +247,10 @@ def get_player_controls(is_paused=False):
             InlineKeyboardButton(STOP_BUTTON, callback_data="music_stop"),
             InlineKeyboardButton(VOLUME_UP_BUTTON, callback_data="music_volume_up")
         ],
-        [InlineKeyboardButton(QUEUE_BUTTON, callback_data="music_queue")],
+        [
+            InlineKeyboardButton(QUEUE_BUTTON, callback_data="music_queue"),
+            InlineKeyboardButton("🎵 Lyrics", callback_data="music_lyrics")
+        ],
         [InlineKeyboardButton(REFRESH_BUTTON, callback_data="music_refresh")]
     ])
 

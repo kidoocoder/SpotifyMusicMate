@@ -52,20 +52,11 @@ async def main():
             print("- You've terminated all sessions from your Telegram account settings")
             print("- The session has expired")
             print("- There were too many authentication attempts")
-            print("\nTo fix this issue, you need to generate a new SESSION_STRING:")
-            print("1. Run: python session_generator.py")
-            print("2. Follow the prompts to log in with your Telegram account")
-            print("3. Save the new SESSION_STRING to your .env file")
-            print("4. Restart the bot")
-            print("\nRun the session generator now? (y/n)")
-            
-            user_input = input().strip().lower()
-            if user_input == "y":
-                try:
-                    from session_generator import generate_session_string
-                    asyncio.run(generate_session_string())
-                except Exception as session_error:
-                    print(f"Error running session generator: {session_error}")
+            print("\nTo fix this issue, the bot owner needs to:")
+            print("1. Generate a new SESSION_STRING using an external tool")
+            print("2. Update the SESSION_STRING in the .env file")
+            print("3. Restart the bot")
+            print("\nYou can find more information in the README.md file.")
         
         sys.exit(1)
 

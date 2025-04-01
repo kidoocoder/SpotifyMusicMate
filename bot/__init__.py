@@ -14,6 +14,7 @@ from .spotify import SpotifyClient
 from .voice_chat import VoiceChat
 from .queue_manager import QueueManager
 from .database import Database
+from .lyrics import LyricsClient
 from .ui import create_ui_components
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,9 @@ async def create_bot():
         client_secret=config.SPOTIFY_CLIENT_SECRET
     )
     
+    # Initialize lyrics client
+    lyrics_client = LyricsClient(api_token=config.GENIUS_API_TOKEN if hasattr(config, "GENIUS_API_TOKEN") else None)
+    
     # Initialize queue manager
     queue_manager = QueueManager()
     
@@ -57,7 +61,7 @@ async def create_bot():
     voice_chat = VoiceChat(call_client, queue_manager, spotify)
     
     # Register command handlers
-    register_commands(bot, voice_chat, queue_manager, spotify, database, config)
+    register_commands(bot, voice_chat, queue_manager, spotify, database, lyrics_client, config)
     
     # Create UI components
     create_ui_components(bot)
@@ -76,11 +80,16 @@ async def create_bot():
     await spotify.initialize()
     logger.info("Spotify client initialized")
     
+    # Initialize lyrics client
+    await lyrics_client.initialize()
+    logger.info("Lyrics client initialized")
+    
     # Add stop method for graceful shutdown
     async def stop():
         await bot.stop()
         await assistant.stop()
         await call_client.stop()
+        await lyrics_client.close()
     
     bot.stop = stop
     

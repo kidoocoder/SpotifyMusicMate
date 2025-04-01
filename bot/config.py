@@ -93,6 +93,9 @@ class Config:
     SPOTIFY_CLIENT_ID: str = os.getenv("SPOTIFY_CLIENT_ID", "")
     SPOTIFY_CLIENT_SECRET: str = os.getenv("SPOTIFY_CLIENT_SECRET", "")
     
+    # Genius API credentials for lyrics (optional)
+    GENIUS_API_TOKEN: str = os.getenv("GENIUS_API_TOKEN", "")
+    
     # MongoDB connection string (optional)
     MONGO_URI: str = os.getenv("MONGO_URI", "mongodb://localhost:27017/music_bot")
     

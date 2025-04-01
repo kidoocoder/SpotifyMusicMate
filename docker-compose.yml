@@ -1,0 +1,11 @@
+version: '3'
+
+services:
+  music_bot:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./cache:/app/cache
+      - ./data:/app/data
+    env_file:
+      - .env

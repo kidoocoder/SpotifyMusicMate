@@ -16,13 +16,14 @@ from .ui import send_now_playing, send_search_results
 
 logger = logging.getLogger(__name__)
 
-def register_commands(bot, voice_chat, queue_manager, spotify, database, config=None):
+def register_commands(bot, voice_chat, queue_manager, spotify, database, lyrics_client, config=None):
     """Register command handlers for the bot."""
     # Store instances for callback query handlers
     bot.voice_chat = voice_chat
     bot.queue_manager = queue_manager
     bot.spotify = spotify
     bot.database = database
+    bot.lyrics_client = lyrics_client
     
     @bot.on_message(filters.command(["start", "help"]))
     async def cmd_start(client, message: Message):
@@ -45,6 +46,7 @@ def register_commands(bot, voice_chat, queue_manager, spotify, database, config=
 /queue - Show the current queue
 /current - Show the current song
 /search [query] - Search for a song
+/lyrics [optional: song name] - Get lyrics for current or specified song
 
 **User Commands:**
 /profile - View your user profile
@@ -871,6 +873,63 @@ Start by using /play command to play music in a voice chat!
         await database.record_user_activity(user_id, "list_favorites")
         
         await message.reply(text, reply_markup=keyboard)
+    
+    @bot.on_message(filters.command("lyrics"))
+    async def cmd_lyrics(client, message: Message):
+        """Handler for /lyrics command to get lyrics for the current or specified song."""
+        chat_id = message.chat.id
+        user_id = message.from_user.id if message.from_user else None
+        
+        # Record user activity
+        if user_id:
+            await database.record_user_activity(user_id, "lyrics", chat_id)
+        
+        # Check if we have a song name in the message
+        query = message.text.split(" ", 1)
+        
+        # If there's a specific song requested
+        if len(query) > 1:
+            song_name = query[1].strip()
+            artist_name = None
+            
+            # Check if format is "Artist - Song"
+            if " - " in song_name:
+                artist_name, song_name = song_name.split(" - ", 1)
+            
+            # Send a temporary message
+            status_msg = await message.reply("🔍 Searching for lyrics...")
+            
+            # Get lyrics
+            lyrics_data = await lyrics_client.get_lyrics_by_search(song_name, artist_name)
+            
+            # Format and send lyrics
+            formatted_lyrics = lyrics_client.format_lyrics_for_telegram(lyrics_data)
+            await status_msg.edit_text(formatted_lyrics, disable_web_page_preview=False)
+            return
+        
+        # If no song specified, use current playing song
+        if chat_id not in voice_chat.active_calls:
+            await message.reply("❌ I'm not in a voice chat. Please specify a song name:\n/lyrics song name\nor\n/lyrics artist - song name")
+            return
+        
+        current_track = voice_chat.active_calls[chat_id].get("current_track")
+        if not current_track:
+            await message.reply("❌ No track is currently playing. Please specify a song name:\n/lyrics song name\nor\n/lyrics artist - song name")
+            return
+        
+        # Send a temporary message
+        status_msg = await message.reply("🔍 Searching for lyrics...")
+        
+        # Get lyrics for current song
+        song_name = current_track["name"]
+        artist_name = current_track["artists"]
+        
+        # Get lyrics
+        lyrics_data = await lyrics_client.get_lyrics_by_search(song_name, artist_name)
+        
+        # Format and send lyrics
+        formatted_lyrics = lyrics_client.format_lyrics_for_telegram(lyrics_data)
+        await status_msg.edit_text(formatted_lyrics, disable_web_page_preview=False)
     
     @bot.on_message(filters.command("settings"))
     async def cmd_settings(client, message: Message):
