@@ -41,8 +41,8 @@ async def create_bot():
     # Initialize PyTgCalls with the assistant
     call_client = PyTgCalls(assistant)
     
-    # Initialize database
-    database = Database()
+    # Initialize database with config
+    database = Database(config)
     
     # Initialize Spotify client
     spotify = SpotifyClient(
@@ -57,7 +57,7 @@ async def create_bot():
     voice_chat = VoiceChat(call_client, queue_manager, spotify)
     
     # Register command handlers
-    register_commands(bot, voice_chat, queue_manager, spotify, database)
+    register_commands(bot, voice_chat, queue_manager, spotify, database, config)
     
     # Create UI components
     create_ui_components(bot)
