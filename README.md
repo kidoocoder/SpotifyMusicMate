@@ -1,6 +1,6 @@
 # Telegram Music Bot
 
-A Telegram bot for playing Spotify songs in group/channel voice chats with an interactive UI.
+A sophisticated Telegram bot for playing Spotify songs in group/channel voice chats with an interactive UI.
 
 ## Features
 
@@ -8,7 +8,11 @@ A Telegram bot for playing Spotify songs in group/channel voice chats with an in
 - Search for songs directly within Telegram
 - Queue management with add, remove, and reorder functionality
 - Interactive UI with playback controls
-- Volume control
+- Volume control and audio quality settings
+- User profiles with personalized settings
+- Favorites system to save and access your favorite songs
+- User activity tracking for advanced analytics
+- Multi-language support for global accessibility
 - Persistent settings and play history
 
 ## Requirements
@@ -56,18 +60,27 @@ python main.py
 
 ### Bot Commands
 
-- `/start`, `/help` - Show help message
-- `/play [song name or URL]` - Play a song
-- `/search [song name]` - Search for a song
-- `/pause` - Pause playback
-- `/resume` - Resume playback
-- `/skip` - Skip to the next song
-- `/stop` - Stop playback and clear queue
-- `/volume [0-200]` - Set volume
-- `/queue` - Show current queue
-- `/current` - Show current playing song
-- `/ping` - Check bot's response time
-- `/stats` - Show bot statistics
+#### Basic Commands
+- `/start`, `/help` - Show help message and list of commands
+- `/play [song name or URL]` - Play a song or add it to queue
+- `/search [song name]` - Search for a song on Spotify
+- `/pause` - Pause the current playback
+- `/resume` - Resume the paused playback
+- `/skip` - Skip to the next song in the queue
+- `/stop` - Stop playback and leave the voice chat
+- `/volume [0-200]` - Set playback volume (default: 100)
+- `/queue` - Show the current song queue
+- `/current` - Show information about the currently playing song
+- `/ping` - Check the bot's response time
+
+#### User Commands
+- `/profile` - View your user profile with statistics and preferences
+- `/settings` - Configure your personal preferences
+- `/favorite` - Add the currently playing song to your favorites
+- `/favorites` - List your favorite songs
+
+#### Statistics and Information
+- `/stats` - Show statistics about the bot usage in the current chat
 
 ## Directory Structure
 
