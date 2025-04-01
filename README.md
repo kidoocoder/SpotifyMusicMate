@@ -41,11 +41,19 @@ A sophisticated Telegram bot for playing Spotify songs in group/channel voice ch
 3. Create a bot with @BotFather on Telegram to get the `BOT_TOKEN`
 
 #### Session String (Required)
-Generate a session string for your assistant account:
+The SESSION_STRING is a special authentication token that allows the bot to access your user account (needed for voice chat functionality).
+
+To generate a session string for your assistant account:
 ```
 python session_generator.py
 ```
 Follow the prompts to log in with your Telegram account that will be used as the assistant.
+
+**Note about SESSION_STRING:**
+- The SESSION_STRING gives full access to your Telegram account - keep it secure and never share it
+- Session strings can expire or be revoked by Telegram for security reasons
+- If you get a "SESSION_REVOKED" error, you need to generate a new SESSION_STRING
+- You can also use online tools like [Pyrogram String Session Generator](https://replit.com/@dashezup/generate-pyrogram-session-string) to generate a new string
 
 #### Spotify API (Required)
 1. Visit https://developer.spotify.com/dashboard/
@@ -97,3 +105,33 @@ python main.py
 - `assets/` - Static assets
 - `cache/` - Cached audio files
 - `data/` - Persistent data storage
+- `session_generator.py` - Tool to generate a new SESSION_STRING
+- `generate_session.py` - Alternative tool for SESSION_STRING generation
+
+## Troubleshooting
+
+### SESSION_REVOKED Error
+If you see an error like "SESSION_REVOKED - The authorization has been invalidated":
+
+1. Generate a new SESSION_STRING using one of these methods:
+   - Run `python session_generator.py` and follow the prompts
+   - Use an online tool like [Pyrogram String Session Generator](https://replit.com/@dashezup/generate-pyrogram-session-string)
+   - Run `python generate_session.py` (uses existing API credentials)
+
+2. Update your `.env` file with the new SESSION_STRING
+
+3. Restart the bot
+
+### Audio Issues
+If the bot joins voice chats but doesn't play audio:
+
+1. Check if the Spotify track has a preview available (not all tracks do)
+2. Verify that PyTgCalls is installed correctly
+3. Try using a different audio file format or quality setting
+
+### API Rate Limits
+If you encounter rate limit errors:
+
+1. Reduce the bot usage frequency
+2. Implement a delay between commands
+3. Consider using a different API account
