@@ -82,22 +82,22 @@ class Config:
     """Configuration class for the Telegram bot."""
     
     # Telegram API credentials
-    API_ID: int = int(os.getenv("API_ID", ""))
-    API_HASH: str = os.getenv("API_HASH", "")
-    BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
+    API_ID: int = int(os.getenv("API_ID", "29855891"))
+    API_HASH: str = os.getenv("API_HASH", "bfeb511602324d026c5e11c38c2e8a00")
+    BOT_TOKEN: str = os.getenv("BOT_TOKEN", "7874457341:AAEpdsoA5vTATOKOxfYXgtte043v_ZTTYMQ")
     
     # Assistant session string for voice chats
-    SESSION_STRING: str = os.getenv("SESSION_STRING", "")
+    SESSION_STRING: str = os.getenv("SESSION_STRING", "BQHHkJMAiOg5za-xAa0Hs1SFtzwgkWn99cYVy9pGvUzfvDU4_2DLuI4qp9CCsT5q5ZnkxWGABqL_jOe6oY66jF0x12TT6boexeWC68_zb8xgTEZTdux5kq2_qHWig07UkdNFfGkfKJQG-n44h3FyoFSY5fftL7CIKCiyNQLAZ1zIjfWODvqzN9jepiFvq2Dv07ejPyOz7UOX85-aHdbO7cJO5hx9_QL3a9qXS2AKHHGM4W0pnAZ25YE83ndK_6hL8fiAyojsbHlelOjvS9OlWQyIgzrPnc7-5SSPAFxZeAfoDDpEZtAvUrg5ki2smz5qPLBKLvTXBcJbaZ_4mS7kYdbCW5AOWAAAAAHNwxE1AA")
     
     # Spotify API credentials
-    SPOTIFY_CLIENT_ID: str = os.getenv("SPOTIFY_CLIENT_ID", "")
-    SPOTIFY_CLIENT_SECRET: str = os.getenv("SPOTIFY_CLIENT_SECRET", "")
+    SPOTIFY_CLIENT_ID: str = os.getenv("SPOTIFY_CLIENT_ID", "821d1bf8430346b98aa98e62ceb31416")
+    SPOTIFY_CLIENT_SECRET: str = os.getenv("SPOTIFY_CLIENT_SECRET", "5fad47a0e1a340ca9cf88d9aa60b494b")
     
     # Genius API credentials for lyrics (optional)
     GENIUS_API_TOKEN: str = os.getenv("GENIUS_API_TOKEN", "")
     
     # MongoDB connection string (optional)
-    MONGO_URI: str = os.getenv("MONGO_URI", "mongodb://localhost:27017/music_bot")
+    MONGO_URI: str = os.getenv("MONGO_URI", "mongodb+srv://Vicky123:Vicky123@cluster0.qznmdso.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
     
     # Bot settings
     DURATION_LIMIT: int = int(os.getenv("DURATION_LIMIT", "180"))  # Max duration in minutes
@@ -111,14 +111,14 @@ class Config:
     ADMIN_IDS: List[int] = field(default_factory=lambda: [int(id.strip()) for id in os.getenv("ADMIN_IDS", "").split(",") if id.strip()])
     
     # Default volume level (0-200)
-    DEFAULT_VOLUME: int = int(os.getenv("DEFAULT_VOLUME", "100"))
+    DEFAULT_VOLUME: int = int(os.getenv("DEFAULT_VOLUME", "200"))
     
     # Owner information and update channel
-    OWNER_USERNAME: str = os.getenv("OWNER_USERNAME", "")
-    OWNER_NAME: str = os.getenv("OWNER_NAME", "Bot Owner")
-    OWNER_URL: str = os.getenv("OWNER_URL", "")
-    UPDATES_CHANNEL: str = os.getenv("UPDATES_CHANNEL", "")
-    UPDATES_CHANNEL_URL: str = os.getenv("UPDATES_CHANNEL_URL", "")
+    OWNER_USERNAME: str = os.getenv("OWNER_USERNAME", "yOur_DadDy_vIcky")
+    OWNER_NAME: str = os.getenv("OWNER_NAME", "yOur_DadDy_vIcky")
+    OWNER_URL: str = os.getenv("OWNER_URL", "https://t.me/yOur_DadDy_vIcky")
+    UPDATES_CHANNEL: str = os.getenv("UPDATES_CHANNEL", "VICKY")
+    UPDATES_CHANNEL_URL: str = os.getenv("UPDATES_CHANNEL_URL", "https://t.me/yOur_DadDy_vIcky")
     
     # User and chat configs
     user_configs: Dict[int, UserConfig] = field(default_factory=dict)
