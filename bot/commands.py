@@ -28,6 +28,17 @@ def register_commands(bot, voice_chat, queue_manager, spotify, database, lyrics_
     bot.lyrics_client = lyrics_client
     bot.config = config
     
+    # Voice overlay callbacks
+    @bot.on_callback_query(filters=lambda query: query.data == "join_voice_chat" or query.data.startswith("react_"))
+    async def voice_overlay_callbacks(client, callback_query):
+        """Handle callbacks for voice overlay reactions and actions."""
+        if not hasattr(client, "voice_overlay"):
+            await callback_query.answer("Voice overlay not available")
+            return
+            
+        # Delegate to the voice overlay handler
+        await client.voice_overlay.handle_voice_callback(callback_query)
+    
     @bot.on_message(filters.command(["start"]))
     async def cmd_start(client, message: Message):
         """Enhanced handler for /start command showing user profile picture."""
@@ -77,8 +88,15 @@ def register_commands(bot, voice_chat, queue_manager, spotify, database, lyrics_
 
 **Advanced Commands:**
 /volume [0-200] - Set the volume (default: 100)
+/listeners - See who's listening in the voice chat
 /ping - Check bot latency
 /stats - Show bot statistics
+
+**Fun & Games:**
+/quiz [num_questions] [difficulty] [genre] - Start a music quiz
+    • num_questions: 1-10 (default: 5)
+    • difficulty: easy, medium, hard (default: medium)
+    • genre: (optional) specify a music genre
 
 Start by using /play command to play music in a voice chat!
         """
@@ -1112,3 +1130,160 @@ Start by using /play command to play music in a voice chat!
         
         # Pass to handler for owner commands
         await handle_owner_command(client, message, command, args, config, database)
+        
+    @bot.on_message(filters.command(["listeners"]))
+    async def cmd_listeners(client, message: Message):
+        """Handler for /listeners command to show active participants in the voice chat."""
+        # Send immediate typing action for better user experience
+        await client.send_chat_action(message.chat.id, "typing")
+        
+        chat_id = message.chat.id
+        user_id = message.from_user.id if message.from_user else None
+        
+        # Record user activity in background to avoid delay
+        if user_id:
+            asyncio.create_task(database.record_user_activity(user_id, "listeners"))
+        
+        # Check if we're in a voice chat
+        if chat_id not in voice_chat.active_calls:
+            await message.reply("❌ I'm not in a voice chat in this chat.")
+            return
+        
+        # Check if voice overlay is available
+        if not hasattr(client, "voice_overlay"):
+            await message.reply("⚠️ Voice participant tracking is not available.")
+            return
+        
+        # Get active participants
+        active_participants = await client.voice_overlay.get_active_participants(chat_id)
+        
+        if not active_participants:
+            await message.reply("📢 No active listeners detected in the voice chat.")
+            return
+        
+        # Get participant info
+        participants_info = []
+        for participant_id in active_participants:
+            try:
+                user = await client.get_users(participant_id)
+                if user:
+                    username = user.username or f"{user.first_name} {user.last_name or ''}"
+                    participants_info.append(f"• {username.strip()} (`{participant_id}`)")
+            except Exception as e:
+                logger.error(f"Error getting user info: {e}")
+        
+        # Create a UI image with the current track and participants if possible
+        current_track = voice_chat.active_calls[chat_id].get("current_track")
+        if current_track and hasattr(client, "voice_overlay"):
+            # Get or create the image
+            image_path = await client.voice_overlay.create_participants_image(chat_id, current_track)
+            
+            if image_path:
+                # Create a caption with listeners
+                caption = f"🎧 **Current Listeners ({len(active_participants)})**\n\n"
+                caption += f"**Now Playing:** {current_track.get('name', 'Unknown')}\n"
+                caption += f"**By:** {current_track.get('artists', 'Unknown')}\n\n"
+                caption += "\n".join(participants_info[:10])  # Limit to 10 participants in text
+                
+                if len(participants_info) > 10:
+                    caption += f"\n\n...and {len(participants_info) - 10} more"
+                
+                # Send the image with participant information
+                await message.reply_photo(
+                    photo=image_path,
+                    caption=caption
+                )
+                return
+        
+        # Fallback to text only if no image was created
+        text = f"🎧 **Voice Chat Listeners ({len(active_participants)})**\n\n"
+        if participants_info:
+            text += "\n".join(participants_info[:20])  # Limit to 20 participants
+            
+            if len(participants_info) > 20:
+                text += f"\n\n...and {len(participants_info) - 20} more"
+        else:
+            text += "No listener information available."
+            
+        await message.reply(text)
+            
+    @bot.on_message(filters.command(["quiz", "musicquiz"]))
+    # Rate limiting will be applied inside the handler
+    async def cmd_quiz(client, message: Message):
+        """Start a music quiz in the current chat."""
+        # Apply rate limiting (once every 5 seconds per user)
+        user_id = message.from_user.id
+        if not await rate_limiter(user_id, "quiz", limit=1, time_window=5):
+            await message.reply("⏱ Please wait before starting another quiz")
+            return
+            
+        # Send immediate typing action
+        await client.send_chat_action(message.chat.id, "typing")
+        
+        # Get quiz manager instance
+        quiz_manager = getattr(client, "quiz_manager", None)
+        if not quiz_manager:
+            logger.error("Quiz manager not initialized")
+            await message.reply("❌ Quiz functionality is not available at the moment. Please try again later.")
+            return
+            
+        # Check if there's already an active quiz
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+        
+        active_quiz = quiz_manager.get_quiz(chat_id)
+        if active_quiz and active_quiz.is_active():
+            await message.reply("❌ A quiz is already in progress in this chat!")
+            return
+            
+        # Parse arguments
+        try:
+            args = message.text.split()[1:]
+            num_questions = 5  # Default
+            genre = None
+            difficulty = "medium"  # Default
+            
+            if args:
+                for arg in args:
+                    if arg.isdigit():
+                        num_questions = min(max(int(arg), 1), 10)  # Limit to 1-10 questions
+                    elif arg.lower() in ["easy", "medium", "hard"]:
+                        difficulty = arg.lower()
+                    else:
+                        genre = arg.lower()
+        except Exception as e:
+            logger.error(f"Error parsing quiz arguments: {e}")
+            # Use defaults if parsing fails
+            num_questions = 5
+            genre = None
+            difficulty = "medium"
+            
+        # Send acknowledgment
+        await message.reply(f"🎮 Creating a music quiz with {num_questions} questions" + 
+                          (f" in the {genre} genre" if genre else "") +
+                          f" ({difficulty} difficulty)...")
+                          
+        # Get user info for username mapping
+        usernames = {}
+        try:
+            if message.chat.type != "private":
+                async for member in client.get_chat_members(chat_id):
+                    if member.user and not member.user.is_bot:
+                        usernames[member.user.id] = member.user.username or member.user.first_name
+        except Exception as e:
+            logger.error(f"Error getting chat members: {e}")
+            
+        # Create the quiz
+        new_quiz = await quiz_manager.create_quiz(
+            chat_id=chat_id,
+            creator_id=user_id,
+            num_questions=num_questions,
+            genre=genre,
+            difficulty=difficulty
+        )
+        
+        if new_quiz:
+            # Start the quiz by sending the first question
+            await new_quiz.send_question(client, chat_id, usernames)
+        else:
+            await message.reply("❌ Failed to create quiz. Please try again later.")

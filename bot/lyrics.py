@@ -186,12 +186,108 @@ class LyricsClient:
             logger.error(f"Error fetching lyrics: {e}")
             return None
     
-    def format_lyrics_for_telegram(self, lyrics_data, max_length=4000):
+    async def get_lyrics_with_translations(self, song_name, artist_name=None, target_language=None):
+        """Get lyrics with translation if available.
+        
+        Args:
+            song_name: Name of the song
+            artist_name: Optional artist name
+            target_language: ISO language code for translation (e.g., 'es', 'fr')
+            
+        Returns:
+            Dict with lyrics info including translations if available
+        """
+        lyrics_data = await self.get_lyrics_by_search(song_name, artist_name)
+        if not lyrics_data:
+            return None
+            
+        # If target language is specified, try to get translation
+        if target_language and self.api_token:
+            # The actual translation would require a proper translation service API
+            # This is a placeholder for where you would integrate with a translation API
+            try:
+                # Create a cleaned version of lyrics for translation (limit to a reasonable size)
+                orig_lyrics = lyrics_data.get("lyrics", "")
+                lyrics_for_translation = orig_lyrics[:5000]  # Limit to 5000 chars
+                
+                # Note: In a real implementation, you would call a translation API here
+                translated_lyrics = f"Translation to {target_language} would go here in a real implementation."
+                
+                # Add translation to lyrics data
+                lyrics_data["translated_lyrics"] = translated_lyrics
+                lyrics_data["translation_language"] = target_language
+            except Exception as e:
+                logger.error(f"Error translating lyrics: {e}")
+                # Continue without translation
+        
+        return lyrics_data
+    
+    async def get_synchronized_lyrics(self, song_name, artist_name=None):
+        """Get time-synchronized lyrics if available.
+        
+        Args:
+            song_name: Name of the song
+            artist_name: Optional artist name
+            
+        Returns:
+            Dict with lyrics info including time-synchronized lines if available
+        """
+        # First get normal lyrics
+        lyrics_data = await self.get_lyrics_by_search(song_name, artist_name)
+        if not lyrics_data:
+            return None
+            
+        # Try to get synchronized lyrics
+        await self.initialize()
+        
+        try:
+            # In a real implementation, we would need to find a service that provides
+            # synchronized lyrics data. This could be a specialized LRC file API
+            # or scraping from a service that provides time-synced lyrics.
+            
+            # This is just a placeholder to show the structure
+            # For a real implementation, you'd need to integrate with a service like Musixmatch
+            # or another provider that offers time-synced lyrics
+            
+            # Example structure for synchronized lyrics
+            synced_lyrics = [
+                {"time": 0, "text": "♪ (Intro music) ♪"},
+                {"time": 12500, "text": "First line of lyrics"},
+                {"time": 15800, "text": "Second line of lyrics"},
+                # And so on...
+            ]
+            
+            # Just create a demo structure based on the regular lyrics
+            if lyrics_data.get("lyrics"):
+                lines = lyrics_data["lyrics"].split('\n')
+                fake_synced_lyrics = []
+                current_time = 0
+                
+                for line in lines:
+                    if line.strip():
+                        fake_synced_lyrics.append({
+                            "time": current_time,
+                            "text": line
+                        })
+                        # Add a random time increment (2-5 seconds) for demo purposes
+                        current_time += 2000 + (len(line) * 50)  # Longer lines take longer
+                
+                lyrics_data["synchronized_lyrics"] = fake_synced_lyrics
+                lyrics_data["has_real_sync"] = False  # Mark as not real synchronized data
+            
+        except Exception as e:
+            logger.error(f"Error getting synchronized lyrics: {e}")
+            # Continue without synchronized lyrics
+        
+        return lyrics_data
+    
+    def format_lyrics_for_telegram(self, lyrics_data, max_length=4000, show_translation=False):
         """Format lyrics data for Telegram message.
         
         Args:
             lyrics_data: Dict containing lyrics info
             max_length: Maximum message length (Telegram has a 4096 char limit)
+            show_translation: Whether to show translation if available
             
         Returns:
             Formatted string with lyrics
@@ -204,15 +300,83 @@ class LyricsClient:
         lyrics = lyrics_data.get("lyrics", "Lyrics not available")
         url = lyrics_data.get("source_url", "")
         
-        # Create header
+        # Create header with more info
         header = f"🎵 **{title}**\n👤 {artist}\n\n"
+        
+        # Check if we should show translation
+        if show_translation and "translated_lyrics" in lyrics_data:
+            # In a dual-language format
+            orig_lines = lyrics.split('\n')
+            trans_lines = lyrics_data["translated_lyrics"].split('\n')
+            
+            # Match lines as best we can
+            combined_lyrics = ""
+            for i in range(min(len(orig_lines), len(trans_lines))):
+                if orig_lines[i].strip():
+                    combined_lyrics += f"{orig_lines[i]}\n"
+                    if trans_lines[i].strip():
+                        combined_lyrics += f"➤ {trans_lines[i]}\n"
+                    combined_lyrics += "\n"  # Extra space between verse lines
+            
+            lyrics = combined_lyrics.strip()
+            header += f"🌍 With translation to {lyrics_data.get('translation_language', 'another language')}\n\n"
         
         # Truncate lyrics if too long
         lyrics_length = len(lyrics)
         if lyrics_length > max_length:
             lyrics = lyrics[:max_length-100] + "...\n\n(Lyrics truncated due to length)"
         
-        # Add footer with source
+        # Add footer with source and enhanced info
         footer = f"\n\n🔍 [View full lyrics on Genius]({url})"
         
+        # Add karaoke info if available
+        if "synchronized_lyrics" in lyrics_data:
+            if lyrics_data.get("has_real_sync", False):
+                footer += "\n🎤 Time-synchronized lyrics available - perfect for karaoke!"
+            else:
+                footer += "\n🎤 Basic time alignments available for sing-along."
+                
         return header + lyrics + footer
+    
+    def create_lyrics_pages(self, lyrics_data, page_size=900):
+        """Split lyrics into paginated chunks for better reading.
+        
+        Args:
+            lyrics_data: Dict containing lyrics info
+            page_size: Maximum size of each page (in characters)
+            
+        Returns:
+            List of strings, each representing a page of lyrics
+        """
+        if not lyrics_data:
+            return ["❌ Lyrics not found for this song."]
+            
+        title = lyrics_data.get("title", "Unknown")
+        artist = lyrics_data.get("artist", "Unknown Artist")
+        lyrics = lyrics_data.get("lyrics", "Lyrics not available")
+        url = lyrics_data.get("source_url", "")
+        
+        # Create header
+        header = f"🎵 **{title}**\n👤 {artist}\n\n"
+        
+        # Split lyrics by line and create reasonably sized pages
+        lines = lyrics.split('\n')
+        pages = []
+        current_page = header
+        
+        for line in lines:
+            # If adding this line would make the page too long, start a new page
+            if len(current_page) + len(line) + 1 > page_size and len(current_page) > len(header):
+                current_page += "\n(Continued on next page...)"
+                pages.append(current_page)
+                current_page = f"**{title}** (Continued)\n\n"
+            
+            current_page += line + "\n"
+        
+        # Add the last page if not empty
+        if len(current_page) > len(header):
+            # Add footer to the last page
+            current_page += f"\n\n🔍 [View full lyrics on Genius]({url})"
+            pages.append(current_page)
+        
+        return pages

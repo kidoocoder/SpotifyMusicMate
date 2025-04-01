@@ -12,9 +12,12 @@ from .config import Config
 from .commands import register_commands
 from .spotify import SpotifyClient
 from .voice_chat import VoiceChat
+from .voice_overlay import VoiceOverlay
 from .queue_manager import QueueManager
 from .database import Database
 from .lyrics import LyricsClient
+from .music_quiz import MusicQuiz
+from .image_ui import ImageUI
 from .ui import create_ui_components
 
 logger = logging.getLogger(__name__)
@@ -57,8 +60,20 @@ async def create_bot():
     # Initialize queue manager
     queue_manager = QueueManager()
     
+    # Initialize image UI generator
+    image_ui = ImageUI(config)
+    
+    # Initialize music quiz
+    quiz_manager = MusicQuiz(spotify, database)
+    
     # Initialize voice chat manager
-    voice_chat = VoiceChat(call_client, queue_manager, spotify)
+    voice_chat = VoiceChat(call_client, queue_manager, spotify, client=bot)
+    
+    # Initialize voice overlay
+    voice_overlay = VoiceOverlay(bot)
+    
+    # Set voice overlay on voice chat
+    voice_chat.voice_overlay = voice_overlay
     
     # Register command handlers
     register_commands(bot, voice_chat, queue_manager, spotify, database, lyrics_client, config)
@@ -84,8 +99,25 @@ async def create_bot():
     await lyrics_client.initialize()
     logger.info("Lyrics client initialized")
     
+    # Start voice overlay
+    await voice_overlay.start()
+    logger.info("Voice overlay started")
+    
+    # Attach all instances to the bot for access in callbacks
+    bot.voice_chat = voice_chat
+    bot.queue_manager = queue_manager
+    bot.spotify = spotify
+    bot.database = database
+    bot.lyrics_client = lyrics_client
+    bot.image_ui = image_ui
+    bot.quiz_manager = quiz_manager
+    bot.voice_overlay = voice_overlay
+    
+    logger.info("All components attached to bot instance")
+    
     # Add stop method for graceful shutdown
     async def stop():
+        await voice_overlay.stop()  # Stop voice overlay first
         await bot.stop()
         await assistant.stop()
         await call_client.stop()

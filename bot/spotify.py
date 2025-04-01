@@ -195,6 +195,143 @@ class SpotifyClient:
             logger.error(f"Error getting audio duration: {e}")
             return 0
     
+    async def get_recommendations_by_track(self, track_id, limit=5):
+        """Get track recommendations based on a seed track."""
+        endpoint = f"recommendations?seed_tracks={track_id}&limit={limit}"
+        result = await self._make_request(endpoint)
+        
+        if not result or "tracks" not in result:
+            return []
+        
+        tracks = result["tracks"]
+        formatted_tracks = []
+        
+        for track in tracks:
+            artists = ", ".join([artist["name"] for artist in track["artists"]])
+            formatted_tracks.append({
+                "id": track["id"],
+                "name": track["name"],
+                "artists": artists,
+                "album": track["album"]["name"],
+                "duration_ms": track["duration_ms"],
+                "uri": track["uri"],
+                "preview_url": track["preview_url"],
+                "external_url": track["external_urls"]["spotify"],
+                "album_art": track["album"]["images"][0]["url"] if track["album"]["images"] else None
+            })
+        
+        return formatted_tracks
+        
+    async def get_recommendations_by_artists(self, artist_ids, limit=5):
+        """Get track recommendations based on seed artists."""
+        # Convert artist_ids to a comma-separated string if it's a list
+        if isinstance(artist_ids, list):
+            artist_ids = ",".join(artist_ids[:5])  # Max 5 seed artists
+            
+        endpoint = f"recommendations?seed_artists={artist_ids}&limit={limit}"
+        result = await self._make_request(endpoint)
+        
+        if not result or "tracks" not in result:
+            return []
+        
+        tracks = result["tracks"]
+        formatted_tracks = []
+        
+        for track in tracks:
+            artists = ", ".join([artist["name"] for artist in track["artists"]])
+            formatted_tracks.append({
+                "id": track["id"],
+                "name": track["name"],
+                "artists": artists,
+                "album": track["album"]["name"],
+                "duration_ms": track["duration_ms"],
+                "uri": track["uri"],
+                "preview_url": track["preview_url"],
+                "external_url": track["external_urls"]["spotify"],
+                "album_art": track["album"]["images"][0]["url"] if track["album"]["images"] else None
+            })
+        
+        return formatted_tracks
+        
+    async def get_recommendations_by_genres(self, genres, limit=5):
+        """Get track recommendations based on seed genres."""
+        # Convert genres to a comma-separated string if it's a list
+        if isinstance(genres, list):
+            genres = ",".join(genres[:5])  # Max 5 seed genres
+            
+        endpoint = f"recommendations?seed_genres={genres}&limit={limit}"
+        result = await self._make_request(endpoint)
+        
+        if not result or "tracks" not in result:
+            return []
+        
+        tracks = result["tracks"]
+        formatted_tracks = []
+        
+        for track in tracks:
+            artists = ", ".join([artist["name"] for artist in track["artists"]])
+            formatted_tracks.append({
+                "id": track["id"],
+                "name": track["name"],
+                "artists": artists,
+                "album": track["album"]["name"],
+                "duration_ms": track["duration_ms"],
+                "uri": track["uri"],
+                "preview_url": track["preview_url"],
+                "external_url": track["external_urls"]["spotify"],
+                "album_art": track["album"]["images"][0]["url"] if track["album"]["images"] else None
+            })
+        
+        return formatted_tracks
+        
+    async def get_trending_tracks(self, limit=10):
+        """Get trending tracks based on featured playlists."""
+        # First, get featured playlists
+        endpoint = "browse/featured-playlists?limit=5"
+        playlists_data = await self._make_request(endpoint)
+        
+        if not playlists_data or "playlists" not in playlists_data or "items" not in playlists_data["playlists"]:
+            return []
+            
+        trending_tracks = []
+        playlists = playlists_data["playlists"]["items"]
+        
+        # For each playlist, get a few tracks
+        tracks_per_playlist = min(limit // len(playlists) + 1, 5)  # Distribute tracks, max 5 per playlist
+        
+        for playlist in playlists:
+            playlist_id = playlist.get("id")
+            if not playlist_id:
+                continue
+                
+            endpoint = f"playlists/{playlist_id}/tracks?limit={tracks_per_playlist}"
+            playlist_tracks = await self._make_request(endpoint)
+            
+            if playlist_tracks and "items" in playlist_tracks:
+                for item in playlist_tracks["items"]:
+                    if "track" in item and item["track"]:
+                        track = item["track"]
+                        artists = ", ".join([artist["name"] for artist in track["artists"]])
+                        formatted_track = {
+                            "id": track["id"],
+                            "name": track["name"],
+                            "artists": artists,
+                            "album": track["album"]["name"],
+                            "duration_ms": track["duration_ms"],
+                            "uri": track["uri"],
+                            "preview_url": track["preview_url"],
+                            "external_url": track["external_urls"]["spotify"],
+                            "album_art": track["album"]["images"][0]["url"] if track["album"]["images"] else None
+                        }
+                        trending_tracks.append(formatted_track)
+                        if len(trending_tracks) >= limit:
+                            break
+            
+            if len(trending_tracks) >= limit:
+                break
+                
+        return trending_tracks
+    
     async def close(self):
         """Close the aiohttp session."""
         if self.session:

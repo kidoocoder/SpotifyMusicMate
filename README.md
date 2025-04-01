@@ -34,6 +34,7 @@ A sophisticated Telegram bot for playing Spotify songs in group/channel voice ch
 3. Set up environment variables:
    - Copy `.env.example` to `.env`
    - Fill in your Telegram and Spotify API credentials
+   - Optionally configure owner and update channel information
 
 ### Getting API Credentials
 
@@ -65,6 +66,15 @@ Once generated, add the SESSION_STRING to your `.env` file.
 1. Visit https://genius.com/api-clients
 2. Create a new API client to get your `GENIUS_API_TOKEN`
 3. This token is used for enhanced lyrics functionality (if not provided, the bot will use limited web scraping)
+
+#### Owner and Updates Channel (Optional)
+1. Set `OWNER_USERNAME` to your Telegram username (without @)
+2. Set `OWNER_NAME` to your display name
+3. Set `OWNER_URL` to your Telegram profile URL (e.g., https://t.me/username)
+4. Set `UPDATES_CHANNEL` to your Telegram channel name (without @)
+5. Set `UPDATES_CHANNEL_URL` to your Telegram channel URL (e.g., https://t.me/channel_name)
+
+These settings allow the bot to display "OWNER" and "UPDATES" buttons in the now playing messages.
 
 ## Usage
 
@@ -252,12 +262,20 @@ This will:
 
 3. Set the environment variables in Heroku dashboard or using CLI:
    ```
+   # Required variables
    heroku config:set API_ID=your_api_id
    heroku config:set API_HASH=your_api_hash
    heroku config:set BOT_TOKEN=your_bot_token
    heroku config:set SESSION_STRING=your_session_string
    heroku config:set SPOTIFY_CLIENT_ID=your_spotify_client_id
    heroku config:set SPOTIFY_CLIENT_SECRET=your_spotify_client_secret
+   
+   # Optional - Owner and Updates channel information
+   heroku config:set OWNER_USERNAME=your_username
+   heroku config:set OWNER_NAME="Bot Owner"
+   heroku config:set OWNER_URL=https://t.me/your_username
+   heroku config:set UPDATES_CHANNEL=your_channel
+   heroku config:set UPDATES_CHANNEL_URL=https://t.me/your_channel
    ```
 
 4. Deploy to Heroku:
@@ -279,5 +297,11 @@ This will:
      - `SPOTIFY_CLIENT_ID`
      - `SPOTIFY_CLIENT_SECRET`
      - `GENIUS_API_TOKEN` (optional)
+     - Optional owner and updates information:
+       - `OWNER_USERNAME`
+       - `OWNER_NAME`
+       - `OWNER_URL`
+       - `UPDATES_CHANNEL`
+       - `UPDATES_CHANNEL_URL`
 4. In the `.replit` file, make sure the run command is set to `python main.py`
 5. Click the "Run" button to start the bot

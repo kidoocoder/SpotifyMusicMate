@@ -95,7 +95,17 @@ def clean_html(raw_html):
     return html.unescape(clean_text)
 
 async def rate_limiter(user_id, command, limit=3, time_window=10):
-    """Rate limiter for commands."""
+    """Rate limiter for commands.
+    
+    Args:
+        user_id: User ID to rate limit
+        command: Command name to rate limit
+        limit: Number of allowed uses within time_window
+        time_window: Time window in seconds
+        
+    Returns:
+        bool: True if the command should be allowed, False if it's rate limited
+    """
     # This is a simple in-memory rate limiter
     if not hasattr(rate_limiter, "usage"):
         rate_limiter.usage = {}

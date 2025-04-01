@@ -18,14 +18,24 @@ logger = logging.getLogger(__name__)
 class VoiceChat:
     """Manager for voice chat functionality."""
     
-    def __init__(self, call_client, queue_manager, spotify):
+    def __init__(self, call_client, queue_manager, spotify, client=None):
         self.call_client = call_client
         self.queue_manager = queue_manager
         self.spotify = spotify
+        self.client = client  # The Pyrogram client for user information
         self.active_calls = {}  # chat_id -> call_info
+        self.voice_overlay = None  # Will be set after initialization
         
         # Register pytgcalls handlers
         self.call_client.add_handler(self._on_stream_end, filters.stream_end)
+        
+        # Check if participants_update filter exists (handles different PyTgCalls versions)
+        try:
+            self.call_client.add_handler(self._on_participant_update, filters.participants_update)
+        except (AttributeError, TypeError):
+            logger.warning("participants_update filter not available in this version of PyTgCalls")
+            # We'll use alternative methods for participant tracking
+            
         # Add other handlers here when needed
     
     async def join_voice_chat(self, chat_id, user_id=None):
@@ -47,7 +57,12 @@ class VoiceChat:
                 "start_time": time.time(),
                 "current_track": None,
                 "volume": 100,
+                "participants": set(),  # Set of user_ids in the voice chat
             }
+            
+            # Track the user who started the chat
+            if user_id and self.voice_overlay:
+                await self.voice_overlay.track_participant(chat_id, user_id)
             
             logger.info(f"Joined voice chat in {chat_id}")
             return True
@@ -58,6 +73,7 @@ class VoiceChat:
                 "start_time": time.time(),
                 "current_track": None,
                 "volume": 100,
+                "participants": set(),  # Set of user_ids in the voice chat
             }
             logger.info(f"Already in voice chat {chat_id}")
             return True
@@ -74,11 +90,21 @@ class VoiceChat:
             await self.call_client.leave_group_call(chat_id)
             self.active_calls.pop(chat_id, None)
             self.queue_manager.clear_queue(chat_id)
+            
+            # Clear participants from the voice overlay
+            if self.voice_overlay:
+                await self.voice_overlay.clear_chat_participants(chat_id)
+                
             logger.info(f"Left voice chat in {chat_id}")
             return True
         except NotInCallError:
             self.active_calls.pop(chat_id, None)
             self.queue_manager.clear_queue(chat_id)
+            
+            # Clear participants from the voice overlay
+            if self.voice_overlay:
+                await self.voice_overlay.clear_chat_participants(chat_id)
+                
             logger.info(f"Already left voice chat in {chat_id}")
             return True
         except Exception as e:
@@ -111,6 +137,9 @@ class VoiceChat:
             
             # Update active call info
             self.active_calls[chat_id]["current_track"] = track_info
+            
+            # Update voice overlay with the new track if available
+            await self.update_voice_overlay(chat_id, track_info)
             
             logger.info(f"Playing track {track_info['name']} in {chat_id}")
             return True, f"Now playing: {track_info['name']} by {track_info['artists']}"
@@ -227,5 +256,46 @@ class VoiceChat:
     async def _on_closed_voice_chat(self, client, chat_id: int):
         """Callback for when a voice chat is closed."""
         logger.info(f"Voice chat closed in {chat_id}")
+        
+        # Clear participants from the voice overlay
+        if self.voice_overlay:
+            await self.voice_overlay.clear_chat_participants(chat_id)
+            
         self.active_calls.pop(chat_id, None)
         self.queue_manager.clear_queue(chat_id)
+        
+    async def _on_participant_update(self, update):
+        """Callback for when participants change in a voice chat."""
+        chat_id = update.chat_id
+        
+        if not self.voice_overlay or chat_id not in self.active_calls:
+            return
+            
+        logger.info(f"Participant update in {chat_id}: {len(update.participants)} participants")
+        
+        # Track participants
+        if hasattr(update, 'participants') and update.participants:
+            for participant in update.participants:
+                user_id = participant.user_id
+                
+                # Only track non-bot participants
+                user = await self.client.get_users(user_id)
+                if user and not user.is_bot:
+                    # Add to voice_participants for tracking
+                    await self.voice_overlay.track_participant(chat_id, user_id)
+                    
+                    # Update the voice overlay UI
+                    current_track = self.active_calls[chat_id].get("current_track")
+                    if current_track:
+                        await self.update_voice_overlay(chat_id, current_track)
+    
+    async def update_voice_overlay(self, chat_id, track_info):
+        """Update the voice overlay UI for a chat."""
+        if not self.voice_overlay or chat_id not in self.active_calls:
+            return
+            
+        try:
+            # Send or update the voice chat announcement
+            await self.voice_overlay.send_voice_announcement(chat_id, track_info, True)
+        except Exception as e:
+            logger.error(f"Error updating voice overlay: {e}", exc_info=True)

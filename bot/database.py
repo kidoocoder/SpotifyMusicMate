@@ -30,18 +30,27 @@ class Database:
             "chat_config": {},  # chat_id -> config 
             "user_favorites": {},  # user_id -> favorites
             "top_tracks": {},  # chat_id -> top tracks
+            "user_playlists": {},  # user_id -> playlists
+            "playlist": {},  # playlist_id -> playlist
+            "public_playlists": [],  # list of public playlists
         }
         self._cache_ttl = {
             "user_config": 300,  # 5 minutes
             "chat_config": 300,  # 5 minutes
             "user_favorites": 120,  # 2 minutes
             "top_tracks": 180,  # 3 minutes
+            "user_playlists": 120,  # 2 minutes
+            "playlist": 120,  # 2 minutes
+            "public_playlists": 180,  # 3 minutes
         }
         self._cache_timestamps = {
             "user_config": {},
             "chat_config": {},
             "user_favorites": {},
             "top_tracks": {},
+            "user_playlists": {},
+            "playlist": {},
+            "public_playlists": 0,  # timestamp for public playlists cache
         }
         
         # Initialize connection
@@ -523,6 +532,188 @@ class Database:
         except Exception as e:
             logger.error(f"Error reading data from file {file_path}: {e}", exc_info=True)
             return default or {}
+    
+    # Playlist management methods
+    async def create_playlist(self, playlist_data: Dict[str, Any]) -> bool:
+        """Create a new playlist."""
+        # Invalidate cache
+        user_id = playlist_data.get("user_id")
+        self._invalidate_cache("user_playlists", user_id)
+        self._invalidate_cache("public_playlists", 0)  # Timestamp is 0
+        
+        playlist_id = playlist_data.get("id")
+        
+        if self.connected:
+            await self.db.playlists.insert_one(playlist_data)
+            return True
+        else:
+            # Fallback to file storage
+            await self._save_to_file(f"playlist_{playlist_id}", playlist_data)
+            
+            # Add to user's playlist list file
+            user_playlists = await self._get_from_file(f"user_playlists_{user_id}", {"user_id": user_id, "playlists": []})
+            
+            # Add basic info to user's playlist list
+            user_playlists["playlists"].append({
+                "id": playlist_id,
+                "name": playlist_data.get("name", "Untitled"),
+                "created_at": playlist_data.get("created_at", 0),
+                "is_public": playlist_data.get("is_public", False)
+            })
+            
+            await self._save_to_file(f"user_playlists_{user_id}", user_playlists)
+            
+            return True
+    
+    async def update_playlist(self, playlist_id: str, playlist_data: Dict[str, Any]) -> bool:
+        """Update an existing playlist."""
+        # Invalidate cache
+        user_id = playlist_data.get("user_id")
+        self._invalidate_cache("user_playlists", user_id)
+        self._invalidate_cache("playlist", playlist_id)
+        if playlist_data.get("is_public", False):
+            self._invalidate_cache("public_playlists", 0)  # Timestamp is 0
+        
+        if self.connected:
+            result = await self.db.playlists.update_one(
+                {"id": playlist_id},
+                {"$set": playlist_data}
+            )
+            return result.modified_count > 0
+        else:
+            # Fallback to file storage
+            await self._save_to_file(f"playlist_{playlist_id}", playlist_data)
+            
+            # Also update in user's playlist list if name or is_public changed
+            user_playlists = await self._get_from_file(f"user_playlists_{user_id}", {"user_id": user_id, "playlists": []})
+            
+            for playlist in user_playlists["playlists"]:
+                if playlist["id"] == playlist_id:
+                    playlist["name"] = playlist_data.get("name", playlist["name"])
+                    playlist["is_public"] = playlist_data.get("is_public", playlist["is_public"])
+                    break
+            
+            await self._save_to_file(f"user_playlists_{user_id}", user_playlists)
+            
+            return True
+    
+    async def delete_playlist(self, playlist_id: str) -> bool:
+        """Delete a playlist."""
+        # Get playlist to get user_id for cache invalidation
+        playlist = await self.get_playlist(playlist_id)
+        if not playlist:
+            return False
+            
+        user_id = playlist.get("user_id")
+        
+        # Invalidate cache
+        self._invalidate_cache("user_playlists", user_id)
+        self._invalidate_cache("playlist", playlist_id)
+        if playlist.get("is_public", False):
+            self._invalidate_cache("public_playlists", 0)  # Timestamp is 0
+        
+        if self.connected:
+            result = await self.db.playlists.delete_one({"id": playlist_id})
+            return result.deleted_count > 0
+        else:
+            # Fallback to file storage
+            # Delete playlist file
+            file_path = os.path.join(self.fallback_dir, f"playlist_{playlist_id}.json")
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            
+            # Remove from user's playlist list
+            user_playlists = await self._get_from_file(f"user_playlists_{user_id}", {"user_id": user_id, "playlists": []})
+            
+            original_length = len(user_playlists["playlists"])
+            user_playlists["playlists"] = [p for p in user_playlists["playlists"] if p["id"] != playlist_id]
+            
+            if len(user_playlists["playlists"]) < original_length:
+                await self._save_to_file(f"user_playlists_{user_id}", user_playlists)
+                return True
+            
+            return False
+    
+    async def get_playlist(self, playlist_id: str) -> Optional[Dict[str, Any]]:
+        """Get a playlist by ID."""
+        # Try cache first for fast response
+        cached = self._get_cache("playlist", playlist_id)
+        if cached:
+            return cached
+        
+        # If not in cache, proceed with normal lookup
+        if self.connected:
+            playlist = await self.db.playlists.find_one({"id": playlist_id})
+            if playlist:
+                return self._set_cache("playlist", playlist_id, playlist)
+        else:
+            # Fallback to file storage
+            playlist = await self._get_from_file(f"playlist_{playlist_id}", None)
+            if playlist:
+                return self._set_cache("playlist", playlist_id, playlist)
+        
+        return None
+    
+    async def get_user_playlists(self, user_id: int) -> List[Dict[str, Any]]:
+        """Get all playlists for a user."""
+        # Try cache first for fast response
+        cached = self._get_cache("user_playlists", user_id)
+        if cached:
+            return cached
+        
+        # If not in cache, proceed with normal lookup
+        if self.connected:
+            cursor = self.db.playlists.find({"user_id": user_id})
+            playlists = await cursor.to_list(length=100)  # Limit to 100 playlists per user
+            return self._set_cache("user_playlists", user_id, playlists)
+        else:
+            # Fallback to file storage
+            user_playlists = await self._get_from_file(f"user_playlists_{user_id}", {"user_id": user_id, "playlists": []})
+            
+            # Get full playlist details
+            result = []
+            for playlist_summary in user_playlists.get("playlists", []):
+                playlist_id = playlist_summary.get("id")
+                if playlist_id:
+                    full_playlist = await self._get_from_file(f"playlist_{playlist_id}", None)
+                    if full_playlist:
+                        result.append(full_playlist)
+            
+            return self._set_cache("user_playlists", user_id, result)
+    
+    async def get_public_playlists(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get public playlists."""
+        # Try cache first for fast response
+        if self._is_cache_valid("public_playlists", 0):  # 0 is used as the timestamp key
+            return self._cache["public_playlists"][:limit]
+        
+        # If not in cache, proceed with normal lookup
+        if self.connected:
+            cursor = self.db.playlists.find({"is_public": True}).sort("updated_at", -1).limit(limit)
+            playlists = await cursor.to_list(length=limit)
+            self._cache["public_playlists"] = playlists
+            self._cache_timestamps["public_playlists"] = time.time()
+            return playlists
+        else:
+            # Fallback to file storage - this is inefficient but works
+            public_playlists = []
+            
+            # This is inefficient but workable for file storage
+            for filename in os.listdir(self.fallback_dir):
+                if filename.startswith("playlist_") and filename.endswith(".json"):
+                    playlist = await self._get_from_file(filename[:-5], None)  # Remove .json
+                    if playlist and playlist.get("is_public", False):
+                        public_playlists.append(playlist)
+            
+            # Sort by updated_at
+            public_playlists.sort(key=lambda p: p.get("updated_at", 0), reverse=True)
+            
+            # Limit and cache
+            result = public_playlists[:limit]
+            self._cache["public_playlists"] = result
+            self._cache_timestamps["public_playlists"] = time.time()
+            
+            return result
     
     async def close(self):
         """Close the database connection."""

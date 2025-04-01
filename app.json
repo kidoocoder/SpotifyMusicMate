@@ -50,6 +50,27 @@
     "ADMIN_IDS": {
       "description": "Comma-separated list of admin user IDs",
       "required": false
+    },
+    "OWNER_USERNAME": {
+      "description": "Telegram username of the bot owner (without @)",
+      "required": false
+    },
+    "OWNER_NAME": {
+      "description": "Display name of the bot owner",
+      "required": false,
+      "value": "Bot Owner"
+    },
+    "OWNER_URL": {
+      "description": "URL to the owner's Telegram profile (e.g., https://t.me/username)",
+      "required": false
+    },
+    "UPDATES_CHANNEL": {
+      "description": "Telegram channel name for updates (without @)",
+      "required": false
+    },
+    "UPDATES_CHANNEL_URL": {
+      "description": "URL to the updates channel (e.g., https://t.me/channel_name)",
+      "required": false
     }
   },
   "scripts": {

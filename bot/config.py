@@ -113,6 +113,13 @@ class Config:
     # Default volume level (0-200)
     DEFAULT_VOLUME: int = int(os.getenv("DEFAULT_VOLUME", "100"))
     
+    # Owner information and update channel
+    OWNER_USERNAME: str = os.getenv("OWNER_USERNAME", "")
+    OWNER_NAME: str = os.getenv("OWNER_NAME", "Bot Owner")
+    OWNER_URL: str = os.getenv("OWNER_URL", "")
+    UPDATES_CHANNEL: str = os.getenv("UPDATES_CHANNEL", "")
+    UPDATES_CHANNEL_URL: str = os.getenv("UPDATES_CHANNEL_URL", "")
+    
     # User and chat configs
     user_configs: Dict[int, UserConfig] = field(default_factory=dict)
     chat_configs: Dict[int, ChatConfig] = field(default_factory=dict)
