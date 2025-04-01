@@ -82,7 +82,7 @@ class Config:
     """Configuration class for the Telegram bot."""
     
     # Telegram API credentials
-    API_ID: int = int(os.getenv("API_ID", "0"))
+    API_ID: int = int(os.getenv("API_ID", ""))
     API_HASH: str = os.getenv("API_HASH", "")
     BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
     
